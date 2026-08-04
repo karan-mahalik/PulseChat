@@ -9,32 +9,48 @@ const ChatPage = () => {
 
   const { user } = useAuth()
 
+  useEffect(() => {
+
+    if (!user) return;
+
+    socket.auth = {
+      userId: user._id,
+    };
+
+    socket.connect();
+
+    return () => socket.disconnect();
+
+  }, [user]);
+
   const [conversations, setConversations] = useState([])
   const [selectedConversation, setSelectedConversation] = useState(null)
   const [messages, setMessages] = useState([])
   const [messageText, setMessageText] = useState("")
+  const [typingUser, setTypingUser] = useState("");
   const [onlineUsers, setOnlineUsers] = useState([])
   const [loadingConvo, setLoadingConvo] = useState(true)
   const [loadingMsg, setLoadingMsg] = useState(false)
   const [openChatOnMobile, setOpenChatOnMobile] = useState(false)
   const messagesEndRef = useRef(null)
+  const typingTimeout = useRef(null);
   const [showNewChat, setShowNewChat] = useState(false);
 
 
-const loadConversations = async () => {
-  try {
-    const data = await fetchConversations();
-    setConversations(data);
-  } catch (err) {
-    console.log("Failed to load conversations");
-  }
+  const loadConversations = async () => {
+    try {
+      const data = await fetchConversations();
+      setConversations(data);
+    } catch (err) {
+      console.log("Failed to load conversations");
+    }
 
-  setLoadingConvo(false);
-};
+    setLoadingConvo(false);
+  };
 
-useEffect(() => {
-  loadConversations();
-}, []);
+  useEffect(() => {
+    loadConversations();
+  }, []);
 
   const scrollToBottom = () => {
     if (messagesEndRef.current) {
@@ -67,21 +83,21 @@ useEffect(() => {
 
 
   const handleSend = async (e) => {
-  e.preventDefault();
+    e.preventDefault();
 
-  if (!selectedConversation || !messageText.trim()) return;
+    if (!selectedConversation || !messageText.trim()) return;
 
-  try {
-    await sendMessageApi(
-      selectedConversation._id,
-      messageText
-    );
+    try {
+      await sendMessageApi(
+        selectedConversation._id,
+        messageText
+      );
 
-    setMessageText("");
-  } catch (err) {
-    console.log(err);
-  }
-};
+      setMessageText("");
+    } catch (err) {
+      console.log(err);
+    }
+  };
 
   const formatLastSeen = (dateString) => {
     if (!dateString) {
@@ -131,6 +147,37 @@ useEffect(() => {
 
     return () => socket.off("onlineUsers")
   }, [])
+
+  useEffect(() => {
+
+    socket.on("userTyping", ({ conversationId, userName }) => {
+
+      if (
+        selectedConversation &&
+        selectedConversation._id === conversationId
+      ) {
+        setTypingUser(userName);
+      }
+
+    });
+
+    socket.on("userStopTyping", ({ conversationId }) => {
+
+      if (
+        selectedConversation &&
+        selectedConversation._id === conversationId
+      ) {
+        setTypingUser("");
+      }
+
+    });
+
+    return () => {
+      socket.off("userTyping");
+      socket.off("userStopTyping");
+    };
+
+  }, [selectedConversation]);
 
   useEffect(() => {
     scrollToBottom()
@@ -223,7 +270,9 @@ useEffect(() => {
 
 
 
-      <div className={`${openChatOnMobile ? "flex" : "hidden md:flex"} flex-1 flex-col`}>
+      <div
+        className={`${openChatOnMobile ? "flex" : "hidden md:flex"} flex-1 flex-col h-screen overflow-hidden`}
+      >
 
         {!selectedConversation ? (
           <div className="flex-1 flex items-center justify-center text-gray-500">
@@ -232,7 +281,7 @@ useEffect(() => {
         ) : (
           <>
 
-            <div className="px-4 py-3 border-b border-white/10 bg-[#0C0F1A] flex items-center gap-3">
+            <div className="sticky top-0 z-20 px-4 py-3 border-b border-white/10 bg-[#0C0F1A] flex items-center gap-3">
 
               <button onClick={() => setOpenChatOnMobile(false)} className="md:hidden mr-2 text-lg">
                 ←
@@ -260,7 +309,11 @@ useEffect(() => {
 
             </div>
 
-
+            {typingUser && (
+              <div className="px-4 py-2 text-xs italic text-green-400">
+                {typingUser} is typing...
+              </div>
+            )}
 
             <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-[#05060A]">
 
@@ -299,13 +352,34 @@ useEffect(() => {
 
             <form
               onSubmit={handleSend}
-              className="p-3 border-t border-white/10 flex items-center gap-2 bg-[#05060A]"
+              className="sticky bottom-0 z-20 p-3 border-t border-white/10 flex items-center gap-2 bg-[#05060A]"
             >
 
               <input
                 type="text"
                 value={messageText}
-                onChange={(e) => setMessageText(e.target.value)}
+                onChange={(e) => {
+
+                  setMessageText(e.target.value);
+
+                  if (!selectedConversation) return;
+
+                  socket.emit("typing", {
+                    conversationId: selectedConversation._id,
+                    userName: user.name,
+                  });
+
+                  clearTimeout(typingTimeout.current);
+
+                  typingTimeout.current = setTimeout(() => {
+
+                    socket.emit("stopTyping", {
+                      conversationId: selectedConversation._id,
+                    });
+
+                  }, 1000);
+
+                }}
                 placeholder="Type a message…"
                 className="flex-1 rounded-full bg-[#181C2A] border border-white/10 px-4 py-2 text-sm"
               />
@@ -322,7 +396,7 @@ useEffect(() => {
           </>
         )}
 
-            </div>
+      </div>
 
       {showNewChat && (
         <NewChatModal

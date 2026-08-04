@@ -1,16 +1,81 @@
-# React + Vite
+# PulseChat
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A modern full-stack real-time chat application built using React, Socket.IO, Express.js, and MongoDB.
 
-Currently, two official plugins are available:
+## Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Secure User Authentication (JWT + Cookies)
+- Real-time Messaging
+- Online / Offline Status
+- Last Seen
+- Message Delivery (✓)
+- Message Read Receipts (✓✓)
+- Typing Indicator
+- Responsive Design (Desktop & Mobile)
+- Conversation Management
+- Modern Chat UI
 
-## React Compiler
+## Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+### Frontend
 
-## Expanding the ESLint configuration
+- React.js
+- Vite
+- Tailwind CSS
+- Socket.IO Client
+- React Router
+- Context API
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Backend
+
+- Node.js
+- Express.js
+- MongoDB
+- Mongoose
+- Socket.IO
+- JWT Authentication
+
+## Installation
+
+Clone the repository
+
+```bash
+git clone https://github.com/karan-mahalik/PulseChat.git
+```
+
+Install dependencies
+
+```bash
+npm install
+```
+
+Start development server
+
+```bash
+npm run dev
+```
+
+Frontend runs on
+
+```
+http://localhost:5173
+```
+
+## Screenshots
+
+(Add screenshots after deployment)
+
+## Future Improvements
+
+- File & Media Sharing
+- Emoji Support
+- Push Notifications
+- Voice Messages
+- Group Chats
+
+## Author
+
+**Karan Mahalik**
+
+GitHub:
+https://github.com/karan-mahalik

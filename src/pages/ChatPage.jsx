@@ -35,6 +35,7 @@ const ChatPage = () => {
   const messagesEndRef = useRef(null)
   const typingTimeout = useRef(null);
   const [showNewChat, setShowNewChat] = useState(false);
+  const [initializing, setInitializing] = useState(true);
 
 
   const loadConversations = async () => {
@@ -49,7 +50,46 @@ const ChatPage = () => {
   };
 
   useEffect(() => {
-    loadConversations();
+
+    const init = async () => {
+      try {
+        const data = await fetchConversations();
+
+        setConversations(data);
+        setLoadingConvo(false);
+
+        const savedId = localStorage.getItem("selectedConversation");
+
+        if (savedId) {
+          const convo = data.find(c => c._id === savedId);
+
+          if (convo) {
+
+            setSelectedConversation(convo);
+            setOpenChatOnMobile(true);
+
+            socket.emit("joinRoom", convo._id);
+
+            const data = await fetchMessages(convo._id);
+
+            setMessages(data);
+
+            socket.emit("markAsRead", {
+              conversationId: convo._id,
+              userId: user._id,
+            });
+
+          } else {
+            localStorage.removeItem("selectedConversation");
+          }
+        }
+      } finally {
+        setInitializing(false);
+      }
+    };
+
+    init();
+
   }, []);
 
   const scrollToBottom = () => {
@@ -60,6 +100,7 @@ const ChatPage = () => {
 
   const openConversation = async (convo) => {
     setSelectedConversation(convo)
+    localStorage.setItem("selectedConversation", convo._id);
     setOpenChatOnMobile(true)
 
     socket.emit("joinRoom", convo._id)
@@ -69,6 +110,10 @@ const ChatPage = () => {
     try {
       const data = await fetchMessages(convo._id)
       setMessages(data)
+      socket.emit("markAsRead", {
+        conversationId: convo._id,
+        userId: user._id,
+      });
     } catch (err) {
       console.log("Failed to load messages")
     }
@@ -132,12 +177,28 @@ const ChatPage = () => {
 
 
   useEffect(() => {
-    socket.on("receiveMessage", (msg) => {
-      setMessages(prev => [...prev, { ...msg, delivered: msg.delivered }])
-    })
 
-    return () => socket.off("receiveMessage")
-  }, [])
+    socket.on("receiveMessage", (msg) => {
+
+      setMessages(prev => [...prev, msg]);
+
+      if (
+        selectedConversation &&
+        msg.conversationId === selectedConversation._id
+      ) {
+
+        socket.emit("markAsRead", {
+          conversationId: selectedConversation._id,
+          userId: user._id,
+        });
+
+      }
+
+    });
+
+    return () => socket.off("receiveMessage");
+
+  }, [selectedConversation, user]);
 
 
   useEffect(() => {
@@ -197,16 +258,26 @@ const ChatPage = () => {
 
   useEffect(() => {
     socket.on("messagesRead", ({ conversationId }) => {
-      if (!selectedConversation || selectedConversation._id !== conversationId) return
+      if (!selectedConversation || selectedConversation._id !== conversationId) return;
 
       setMessages(prev =>
         prev.map(m => ({ ...m, read: true }))
-      )
-    })
+      );
+    });
 
-    return () => socket.off("messagesRead")
-  }, [selectedConversation])
+    return () => socket.off("messagesRead");
+  }, [selectedConversation]);
 
+  // 👇 ADD THIS HERE
+  if (initializing) {
+    return (
+      <div className="min-h-screen bg-[#05060A] flex items-center justify-center text-gray-400">
+        Loading...
+      </div>
+    );
+  }
+
+  // Existing return
   return (
     <div className="min-h-screen bg-[#05060A] text-white flex">
 

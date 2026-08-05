@@ -71,3 +71,30 @@ export const startConversation = async (userId) => {
 
   return data.conversation
 }
+
+export const uploadAttachment = async (
+  conversationId,
+  file,
+  text = ""
+) => {
+
+  const formData = new FormData();
+
+  formData.append("conversationId", conversationId);
+  formData.append("text", text);
+  formData.append("file", file);
+
+  const res = await fetch(`${API_URL}/api/chat/upload`, {
+    method: "POST",
+    credentials: "include",
+    body: formData,
+  });
+
+  if (!res.ok) {
+    throw new Error("Upload failed");
+  }
+
+  const data = await res.json();
+
+  return data.message;
+};

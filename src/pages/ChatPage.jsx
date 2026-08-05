@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
-import { fetchConversations, fetchMessages, sendMessageApi } from "../api/chatApi"
+import { fetchConversations, fetchMessages, sendMessageApi, uploadAttachment } from "../api/chatApi"
 import NewChatModal from "../components/NewChatModel";
 import { socket } from "../socket"
 import { useRef } from "react"
@@ -33,6 +33,7 @@ const ChatPage = () => {
   const [loadingMsg, setLoadingMsg] = useState(false)
   const [openChatOnMobile, setOpenChatOnMobile] = useState(false)
   const messagesEndRef = useRef(null)
+  const fileInputRef = useRef(null);
   const typingTimeout = useRef(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -144,6 +145,29 @@ const ChatPage = () => {
     }
   };
 
+  const handleFileUpload = async (e) => {
+
+    const file = e.target.files[0];
+
+    if (!file || !selectedConversation) return;
+
+    try {
+
+      await uploadAttachment(
+        selectedConversation._id,
+        file
+      );
+
+    } catch (err) {
+
+      console.log(err);
+
+    }
+
+    e.target.value = "";
+
+  };
+
   const formatLastSeen = (dateString) => {
     if (!dateString) {
       return "last seen unavailaible"
@@ -184,7 +208,8 @@ const ChatPage = () => {
 
       if (
         selectedConversation &&
-        msg.conversationId === selectedConversation._id
+        msg.conversationId === selectedConversation._id &&
+        msg.sender !== user._id
       ) {
 
         socket.emit("markAsRead", {
@@ -396,7 +421,40 @@ const ChatPage = () => {
                 <div key={msg._id} className={`flex ${msg.sender === user._id ? "justify-end" : "justify-start"}`}
                 >
                   <div className={`max-w-xs px-3 py-2 rounded-2xl text-sm shadow ${msg.sender === user._id ? "bg-[#635BFF] text-white rounded-br-sm" : "bg-[#181C2A] text-gray-100 rounded-bl-sm"}`}>
-                    <p>{msg.text}</p>
+                    {msg.text && <p>{msg.text}</p>}
+
+                    {msg.attachment && (
+                      <div className="mt-2">
+
+                        {msg.attachment.fileType.startsWith("image/") ? (
+                          <img
+                            src={`http://localhost:5000/uploads${msg.attachment.url}`}
+                            alt={msg.attachment.fileName}
+                            className="rounded-lg max-w-[220px]"
+                          />
+                        ) : msg.attachment.fileType.startsWith("video/") ? (
+                          <video
+                            controls
+                            className="rounded-lg max-w-[220px]"
+                          >
+                            <source
+                              src={`http://localhost:5000/uploads${msg.attachment.url}`}
+                              type={msg.attachment.fileType}
+                            />
+                          </video>
+                        ) : (
+                          <a
+                            href={`http://localhost:5000/uploads${msg.attachment.url}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="underline text-blue-300"
+                          >
+                            📄 {msg.attachment.fileName}
+                          </a>
+                        )}
+
+                      </div>
+                    )}
                     <p className="text-[10px] text-gray-300 mt-1 text-right">
                       {new Date(msg.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
@@ -427,6 +485,13 @@ const ChatPage = () => {
             >
 
               <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                onChange={handleFileUpload}
+              />
+
+              <input
                 type="text"
                 value={messageText}
                 onChange={(e) => {
@@ -454,6 +519,14 @@ const ChatPage = () => {
                 placeholder="Type a message…"
                 className="flex-1 rounded-full bg-[#181C2A] border border-white/10 px-4 py-2 text-sm"
               />
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current.click()}
+                className="text-2xl px-2 text-gray-300 hover:text-white"
+              >
+                📎
+              </button>
 
               <button
                 type="submit"

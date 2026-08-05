@@ -4,6 +4,8 @@ import { fetchConversations, fetchMessages, sendMessageApi, uploadAttachment } f
 import NewChatModal from "../components/NewChatModel";
 import { socket } from "../socket"
 import { useRef } from "react"
+import Picker from "@emoji-mart/react";
+import data from "@emoji-mart/data";
 
 const ChatPage = () => {
 
@@ -37,6 +39,8 @@ const ChatPage = () => {
   const typingTimeout = useRef(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const emojiPickerRef = useRef(null);
 
 
   const loadConversations = async () => {
@@ -168,6 +172,10 @@ const ChatPage = () => {
 
   };
 
+  const addEmoji = (emoji) => {
+    setMessageText(prev => prev + emoji.native);
+  };
+
   const formatLastSeen = (dateString) => {
     if (!dateString) {
       return "last seen unavailaible"
@@ -198,6 +206,29 @@ const ChatPage = () => {
 
     return () => socket.off("connect")
   }, [])
+
+  useEffect(() => {
+
+    const handleClickOutside = (e) => {
+
+      if (
+        emojiPickerRef.current &&
+        !emojiPickerRef.current.contains(e.target)
+      ) {
+        setShowEmojiPicker(false);
+      }
+
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+
+    return () =>
+      document.removeEventListener(
+        "mousedown",
+        handleClickOutside
+      );
+
+  }, []);
 
 
   useEffect(() => {
@@ -367,7 +398,7 @@ const ChatPage = () => {
 
 
       <div
-        className={`${openChatOnMobile ? "flex" : "hidden md:flex"} flex-1 flex-col h-screen overflow-hidden`}
+        className={`${openChatOnMobile ? "flex" : "hidden md:flex"} relative flex-1 flex-col h-screen overflow-hidden`}
       >
 
         {!selectedConversation ? (
@@ -479,6 +510,21 @@ const ChatPage = () => {
 
 
 
+            {showEmojiPicker && (
+              <div
+                ref={emojiPickerRef}
+                className="absolute bottom-20 left-4 z-50"
+              >
+                <Picker
+                  data={data}
+                  onEmojiSelect={addEmoji}
+                  theme="dark"
+                  previewPosition="none"
+                  skinTonePosition="none"
+                />
+              </div>
+            )}
+
             <form
               onSubmit={handleSend}
               className="sticky bottom-0 z-20 p-3 border-t border-white/10 flex items-center gap-2 bg-[#05060A]"
@@ -520,6 +566,13 @@ const ChatPage = () => {
                 className="flex-1 rounded-full bg-[#181C2A] border border-white/10 px-4 py-2 text-sm"
               />
 
+              <button
+                type="button"
+                onClick={() => setShowEmojiPicker(prev => !prev)}
+                className="text-2xl px-2 hover:scale-110 transition"
+              >
+                😊
+              </button>
               <button
                 type="button"
                 onClick={() => fileInputRef.current.click()}

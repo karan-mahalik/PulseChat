@@ -98,3 +98,123 @@ export const uploadAttachment = async (
 
   return data.message;
 };
+
+export const updateProfile = async (name, about) => {
+  const res = await fetch(`${API_URL}/api/users/profile`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify({
+      name,
+      about,
+    }),
+  });
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.message || "Failed to update profile");
+  }
+
+  return data.user;
+};
+
+export const changePassword = async (
+  currentPassword,
+  newPassword
+) => {
+  const res = await fetch(
+    `${API_URL}/api/users/password`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        currentPassword,
+        newPassword,
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.message || "Failed to change password"
+    );
+  }
+
+  return data;
+};
+
+// ================= MESSAGE DELETION =================
+
+export const deleteMessageForMe = async (messageId) => {
+  const res = await fetch(
+    `${API_URL}/api/chat/message/${messageId}/me`,
+    {
+      method: "DELETE",
+      credentials: "include",
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.message || "Failed to delete message"
+    );
+  }
+
+  return data;
+};
+
+export const deleteMessageForEveryone = async (messageId) => {
+  const res = await fetch(
+    `${API_URL}/api/chat/message/${messageId}/everyone`,
+    {
+      method: "DELETE",
+      credentials: "include",
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.message || "Failed to delete message"
+    );
+  }
+
+  return data;
+};
+
+export const editMessageApi = async (messageId, text) => {
+  const res = await fetch(
+    `${API_URL}/api/chat/message/${messageId}`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        text,
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.message || "Failed to edit message"
+    );
+  }
+
+  return data.message;
+};

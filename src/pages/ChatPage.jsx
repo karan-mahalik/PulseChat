@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
-import { fetchConversations, fetchMessages, sendMessageApi, uploadAttachment } from "../api/chatApi"
+import { fetchConversations, fetchMessages, sendMessageApi, editMessageApi, uploadAttachment, deleteMessageForMe, deleteMessageForEveryone } from "../api/chatApi"
 import NewChatModal from "../components/NewChatModel";
 import { socket } from "../socket"
 import { useRef } from "react"
+import { useNavigate } from "react-router-dom";
 import Picker from "@emoji-mart/react";
 import data from "@emoji-mart/data";
 
@@ -39,8 +40,14 @@ const ChatPage = () => {
   const typingTimeout = useRef(null);
   const [showNewChat, setShowNewChat] = useState(false);
   const [initializing, setInitializing] = useState(true);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [showDeleteMenu, setShowDeleteMenu] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const [editText, setEditText] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const emojiPickerRef = useRef(null);
+  const navigate = useNavigate();
 
 
   const loadConversations = async () => {
@@ -172,6 +179,74 @@ const ChatPage = () => {
 
   };
 
+  const handleMessageMenu = (message) => {
+    setSelectedMessage(message);
+    setShowDeleteMenu(true);
+  };
+
+  const handleEditClick = () => {
+    if (!selectedMessage) return;
+
+    setEditingMessage(selectedMessage);
+    setEditText(selectedMessage.text || "");
+    setShowDeleteMenu(false);
+  };
+
+  const handleEditMessage = async () => {
+    if (!editingMessage || !editText.trim()) return;
+
+    try {
+      await editMessageApi(
+        editingMessage._id,
+        editText.trim()
+      );
+
+      setMessages(prev =>
+        prev.map(message =>
+          message._id === editingMessage._id
+            ? {
+              ...message,
+              text: editText.trim(),
+              isEdited: true,
+              editedAt: new Date()
+            }
+            : message
+        )
+      );
+
+      setEditingMessage(null);
+      setEditText("");
+      setSelectedMessage(null);
+
+    } catch (error) {
+      console.log("Edit message failed:", error);
+    }
+  };
+
+  const handleDeleteClick = () => {
+    setShowDeleteMenu(false);
+    setShowDeleteConfirm(true);
+  };
+
+  const handleDeleteMessage = async (type) => {
+    if (!selectedMessage) return;
+
+    try {
+      if (type === "me") {
+        await deleteMessageForMe(selectedMessage._id);
+      } else {
+        await deleteMessageForEveryone(selectedMessage._id);
+      }
+
+      setShowDeleteConfirm(false);
+      setSelectedMessage(null);
+
+    } catch (error) {
+      console.log("Delete message failed:", error);
+    }
+  };
+
+
   const addEmoji = (emoji) => {
     setMessageText(prev => prev + emoji.native);
   };
@@ -255,6 +330,91 @@ const ChatPage = () => {
     return () => socket.off("receiveMessage");
 
   }, [selectedConversation, user]);
+
+  useEffect(() => {
+
+    const handleMessageDeletedForMe = ({ messageId }) => {
+
+      setMessages((prev) =>
+        prev.filter((message) => message._id !== messageId)
+      );
+
+    };
+
+    const handleMessageDeletedForEveryone = ({ messageId }) => {
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message._id === messageId
+            ? {
+              ...message,
+              isDeleted: true,
+              text: "",
+              attachment: undefined,
+            }
+            : message
+        )
+      );
+
+    };
+
+    const handleMessageEdited = ({
+      messageId,
+      text,
+      isEdited,
+      editedAt
+    }) => {
+
+      setMessages((prev) =>
+        prev.map((message) =>
+          message._id === messageId
+            ? {
+              ...message,
+              text,
+              isEdited,
+              editedAt
+            }
+            : message
+        )
+      );
+
+    };
+
+    socket.on(
+      "messageDeletedForMe",
+      handleMessageDeletedForMe
+    );
+
+    socket.on(
+      "messageDeletedForEveryone",
+      handleMessageDeletedForEveryone
+    );
+
+    socket.on(
+      "messageEdited",
+      handleMessageEdited
+    );
+
+    return () => {
+
+      socket.off(
+        "messageDeletedForMe",
+        handleMessageDeletedForMe
+      );
+
+      socket.off(
+        "messageDeletedForEveryone",
+        handleMessageDeletedForEveryone
+      );
+
+      socket.off(
+        "messageEdited",
+        handleMessageEdited
+      );
+
+    };
+
+  }, []);
 
 
   useEffect(() => {
@@ -356,6 +516,13 @@ const ChatPage = () => {
             + New Chat
           </button>
 
+          <button
+            onClick={() => navigate("/settings")}
+            className="mt-2 w-full border border-white/10 rounded-lg py-2 text-sm text-gray-300 hover:bg-white/5 transition"
+          >
+            ⚙ Settings
+          </button>
+
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -449,43 +616,209 @@ const ChatPage = () => {
               )}
 
               {!loadingMsg && messages.map((msg) => (
-                <div key={msg._id} className={`flex ${msg.sender === user._id ? "justify-end" : "justify-start"}`}
+                <div
+                  key={msg._id}
+                  className={`group relative flex ${msg.sender === user._id
+                    ? "justify-end"
+                    : "justify-start"
+                    }`}
                 >
-                  <div className={`max-w-xs px-3 py-2 rounded-2xl text-sm shadow ${msg.sender === user._id ? "bg-[#635BFF] text-white rounded-br-sm" : "bg-[#181C2A] text-gray-100 rounded-bl-sm"}`}>
-                    {msg.text && <p>{msg.text}</p>}
-
-                    {msg.attachment && (
-                      <div className="mt-2">
-
-                        {msg.attachment.fileType.startsWith("image/") ? (
-                          <img
-                            src={`http://localhost:5000/uploads${msg.attachment.url}`}
-                            alt={msg.attachment.fileName}
-                            className="rounded-lg max-w-[220px]"
-                          />
-                        ) : msg.attachment.fileType.startsWith("video/") ? (
-                          <video
-                            controls
-                            className="rounded-lg max-w-[220px]"
-                          >
-                            <source
-                              src={`http://localhost:5000/uploads${msg.attachment.url}`}
-                              type={msg.attachment.fileType}
-                            />
-                          </video>
-                        ) : (
-                          <a
-                            href={`http://localhost:5000/uploads${msg.attachment.url}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline text-blue-300"
-                          >
-                            📄 {msg.attachment.fileName}
-                          </a>
-                        )}
-
-                      </div>
+                  <div
+                    className={`relative max-w-xs px-3 py-2 rounded-2xl text-sm shadow ${msg.sender === user._id
+                      ? "bg-[#635BFF] text-white rounded-br-sm"
+                      : "bg-[#181C2A] text-gray-100 rounded-bl-sm"
+                      }`}
+                  >
+                    {!msg.isDeleted && (
+                      <button
+                        type="button"
+                        onClick={() => handleMessageMenu(msg)}
+                        className="absolute -top-3 -right-2 w-7 h-7 rounded-full bg-[#101522] border border-white/10 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition flex items-center justify-center"
+                        aria-label="Message options"
+                      >
+                        ⋮
+                      </button>
                     )}
+                    {msg.isDeleted ? (
+                      <p className="italic text-gray-400">
+                        This message was deleted
+                      </p>
+                    ) : (
+                      <>
+                        {editingMessage?._id === msg._id ? (
+                          <div className="min-w-[220px]">
+
+                            <textarea
+                              value={editText}
+                              onChange={(e) => setEditText(e.target.value)}
+                              autoFocus
+                              rows={3}
+                              className="w-full bg-[#101522] border border-white/10 rounded-lg px-3 py-2 text-sm text-white outline-none focus:border-[#635BFF] resize-none"
+                            />
+
+                            <div className="flex justify-end gap-2 mt-2">
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingMessage(null);
+                                  setEditText("");
+                                }}
+                                className="px-3 py-1.5 rounded-lg text-xs text-gray-400 hover:bg-white/5"
+                              >
+                                Cancel
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={handleEditMessage}
+                                disabled={!editText.trim()}
+                                className="px-3 py-1.5 rounded-lg text-xs bg-[#635BFF] text-white disabled:opacity-50"
+                              >
+                                Save
+                              </button>
+
+                            </div>
+
+                          </div>
+                        ) : (
+                          <>
+                            {msg.text && <p>{msg.text}</p>}
+
+                            {msg.isEdited && (
+                              <span className="text-[10px] text-gray-400 italic ml-1">
+                                edited
+                              </span>
+                            )}
+                          </>
+                        )}
+                        {msg.attachment && (() => {
+
+                          const fileUrl = `http://localhost:5000/uploads${msg.attachment.url}`;
+                          const fileType = msg.attachment.fileType || "";
+                          const fileName = msg.attachment.fileName || "Attachment";
+
+                          const isImage = fileType.startsWith("image/");
+                          const isVideo = fileType.startsWith("video/");
+                          const isPdf = fileType === "application/pdf";
+                          const isAudio = fileType.startsWith("audio/");
+
+                          const extension =
+                            fileName.includes(".")
+                              ? fileName.split(".").pop().toUpperCase()
+                              : "FILE";
+
+                          return (
+                            <div className="mt-2">
+
+                              {/* IMAGE */}
+                              {isImage && (
+                                <a
+                                  href={fileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                >
+                                  <img
+                                    src={fileUrl}
+                                    alt={fileName}
+                                    className="rounded-lg max-w-[240px] max-h-[300px] object-cover cursor-pointer"
+                                  />
+                                </a>
+                              )}
+
+                              {/* VIDEO */}
+                              {isVideo && (
+                                <video
+                                  controls
+                                  className="rounded-lg max-w-[260px] max-h-[300px]"
+                                >
+                                  <source
+                                    src={fileUrl}
+                                    type={fileType}
+                                  />
+                                </video>
+                              )}
+
+                              {/* AUDIO */}
+                              {isAudio && (
+                                <div className="bg-[#101522] border border-white/10 rounded-xl p-3 w-[260px]">
+                                  <div className="flex items-center gap-3 mb-2">
+                                    <div className="w-10 h-10 rounded-lg bg-[#635BFF]/20 flex items-center justify-center text-xl">
+                                      🎵
+                                    </div>
+
+                                    <div className="min-w-0">
+                                      <p className="text-sm font-medium truncate">
+                                        {fileName}
+                                      </p>
+
+                                      <p className="text-xs text-gray-400">
+                                        Audio
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <audio
+                                    controls
+                                    className="w-full"
+                                  >
+                                    <source
+                                      src={fileUrl}
+                                      type={fileType}
+                                    />
+                                  </audio>
+                                </div>
+                              )}
+
+                              {/* PDF / DOCUMENT */}
+                              {!isImage && !isVideo && !isAudio && (
+                                <a
+                                  href={fileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="block w-[280px] max-w-full bg-[#101522] border border-white/10 rounded-xl p-3 hover:bg-[#171c2b] transition"
+                                >
+
+                                  <div className="flex items-center gap-3">
+
+                                    {/* FILE ICON */}
+                                    <div className={`w-11 h-11 rounded-lg flex items-center justify-center text-lg font-bold ${isPdf
+                                      ? "bg-red-500/15 text-red-400"
+                                      : "bg-[#635BFF]/15 text-[#8b83ff]"
+                                      }`}>
+                                      {isPdf ? "PDF" : "📄"}
+                                    </div>
+
+                                    {/* FILE INFORMATION */}
+                                    <div className="flex-1 min-w-0">
+
+                                      <p className="text-sm font-medium truncate">
+                                        {fileName}
+                                      </p>
+
+                                      <p className="text-xs text-gray-400 mt-1">
+                                        {isPdf ? "PDF Document" : `${extension} File`}
+                                      </p>
+
+                                    </div>
+
+                                    {/* OPEN ICON */}
+                                    <div className="text-gray-400 text-lg">
+                                      ↗
+                                    </div>
+
+                                  </div>
+
+                                </a>
+                              )}
+
+                            </div>
+                          );
+
+                        })()}
+                      </>
+                    )}
+
                     <p className="text-[10px] text-gray-300 mt-1 text-right">
                       {new Date(msg.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
@@ -497,6 +830,30 @@ const ChatPage = () => {
                         style={{ color: msg.read ? "#4F9EFF" : "#ccc" }}>
                         {msg.read ? "✓✓" : msg.delivered ? "✓✓" : "✓"}
                       </p>
+                    )}
+
+                    {selectedMessage?._id === msg._id && showDeleteMenu && (
+                      <div className="absolute right-0 top-8 z-50 w-40 bg-[#0C0F1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+
+                        {msg.sender === user._id && msg.text && !msg.isDeleted && (
+                          <button
+                            type="button"
+                            onClick={handleEditClick}
+                            className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5 transition"
+                          >
+                            Edit
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleDeleteClick}
+                          className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-white/5 transition"
+                        >
+                          Delete
+                        </button>
+
+                      </div>
                     )}
 
 
@@ -602,6 +959,57 @@ const ChatPage = () => {
             await loadConversations();
           }}
         />
+      )}
+
+      {showDeleteConfirm && selectedMessage && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+
+          <div className="w-[90%] max-w-sm bg-[#0C0F1A] border border-white/10 rounded-2xl p-5 shadow-2xl">
+
+            <h3 className="text-lg font-semibold text-white">
+              Delete message?
+            </h3>
+
+            <p className="text-sm text-gray-400 mt-2">
+              Choose how you want to delete this message.
+            </p>
+
+            <div className="flex flex-col gap-2 mt-5">
+
+              <button
+                type="button"
+                onClick={() => handleDeleteMessage("me")}
+                className="w-full px-4 py-3 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-white transition"
+              >
+                Delete for me
+              </button>
+
+              {selectedMessage.sender === user._id && (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteMessage("everyone")}
+                  className="w-full px-4 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-sm text-red-400 transition"
+                >
+                  Delete for everyone
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeleteConfirm(false);
+                  setSelectedMessage(null);
+                }}
+                className="w-full px-4 py-3 rounded-lg text-sm text-gray-400 hover:bg-white/5 transition"
+              >
+                Cancel
+              </button>
+
+            </div>
+
+          </div>
+
+        </div>
       )}
 
     </div>

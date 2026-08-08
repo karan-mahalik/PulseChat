@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import LoginPage from '../src/pages/LoginPage'
 import RegisterPage from '../src/pages/RegisterPage'
 import ChatPage from '../src/pages/ChatPage'
+import SettingsPage from "./pages/SettingsPage";
 import PublicRoute from '../src/components/PublicRoute'
 import ProtectedRoute from '../src/components/ProtectedRoute'
 
@@ -19,6 +20,9 @@ const App = () => {
         />
 
         <Route path="/chat" element={<ProtectedRoute><ChatPage /></ProtectedRoute>}
+        />
+
+        <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>}
         />
         <Route path='*' element={<div className='text-center text-white mt-10'>Page not found</div>} />
       </Routes>

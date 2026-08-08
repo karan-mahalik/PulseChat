@@ -1,1 +1,64 @@
 @import "tailwindcss";
+@import "tailwindcss";
+
+/* ================================
+   PULSECHAT THEME SYSTEM
+================================ */
+
+:root {
+    --pc-bg-primary: #05060A;
+    --pc-bg-secondary: #0C0F1A;
+    --pc-bg-card: #0C0F1A;
+    --pc-bg-input: #171B28;
+
+    --pc-text-primary: #FFFFFF;
+    --pc-text-secondary: #9CA3AF;
+    --pc-text-muted: #6B7280;
+
+    --pc-border: rgba(255, 255, 255, 0.10);
+
+    --pc-accent: #635BFF;
+    --pc-accent-hover: #574FFF;
+}
+
+[data-theme="light"] {
+    --pc-bg-primary: #F5F6FA;
+    --pc-bg-secondary: #FFFFFF;
+    --pc-bg-card: #FFFFFF;
+    --pc-bg-input: #F1F2F6;
+
+    --pc-text-primary: #111827;
+    --pc-text-secondary: #4B5563;
+    --pc-text-muted: #6B7280;
+
+    --pc-border: #E5E7EB;
+
+    --pc-accent: #635BFF;
+    --pc-accent-hover: #574FFF;
+}
+
+/* Global page defaults */
+
+html,
+body,
+#root {
+    min-height: 100%;
+    margin: 0;
+}
+
+body {
+    background: var(--pc-bg-primary);
+    color: var(--pc-text-primary);
+    transition:
+        background-color 0.2s ease,
+        color 0.2s ease;
+}
+
+/* Smooth theme transition */
+
+* {
+    transition:
+        background-color 0.2s ease,
+        border-color 0.2s ease,
+        color 0.2s ease;
+}

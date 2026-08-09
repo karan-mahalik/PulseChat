@@ -218,3 +218,29 @@ export const editMessageApi = async (messageId, text) => {
 
   return data.message;
 };
+
+export const reactToMessage = async (messageId, emoji) => {
+  const res = await fetch(
+    `${API_URL}/api/chat/message/${messageId}/reaction`,
+    {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({
+        emoji,
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(
+      data.message || "Failed to update reaction"
+    );
+  }
+
+  return data.reactions;
+};

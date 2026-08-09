@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react"
 import { useAuth } from "../context/AuthContext"
-import { fetchConversations, fetchMessages, sendMessageApi, editMessageApi, uploadAttachment, deleteMessageForMe, deleteMessageForEveryone } from "../api/chatApi"
+import { fetchConversations, fetchMessages, sendMessageApi, editMessageApi, uploadAttachment, deleteMessageForMe, deleteMessageForEveryone, reactToMessage } from "../api/chatApi"
 import NewChatModal from "../components/NewChatModel";
 import { socket } from "../socket"
 import { useRef } from "react"
@@ -45,7 +45,21 @@ const ChatPage = () => {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [editingMessage, setEditingMessage] = useState(null);
   const [editText, setEditText] = useState("");
+
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  // Voice recording
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recordingTimerRef = useRef(null);
+
+  // Reaction UI
+  const [reactionMessageId, setReactionMessageId] = useState(null);
+  const [reactionPickerMessageId, setReactionPickerMessageId] = useState(null);
+
+
   const emojiPickerRef = useRef(null);
   const navigate = useNavigate();
 
@@ -138,6 +152,98 @@ const ChatPage = () => {
     return c.participants.find((p) => p._id !== user._id)
   }
 
+  const startRecording = async () => {
+    try {
+      if (!selectedConversation) return;
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+
+      const mediaRecorder = new MediaRecorder(stream);
+
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, {
+          type: mediaRecorder.mimeType || "audio/webm",
+        });
+
+        // Stop microphone
+        stream.getTracks().forEach((track) => track.stop());
+
+        // Create a file from recorded audio
+        const audioFile = new File(
+          [audioBlob],
+          `voice-${Date.now()}.webm`,
+          {
+            type: audioBlob.type,
+          }
+        );
+
+        try {
+          await uploadAttachment(
+            selectedConversation._id,
+            audioFile
+          );
+        } catch (error) {
+          console.log("Voice message upload failed:", error);
+        }
+
+        audioChunksRef.current = [];
+      };
+
+      mediaRecorder.start();
+
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+
+    } catch (error) {
+      console.log("Microphone permission/error:", error);
+    }
+  };
+
+
+  const stopRecording = () => {
+    if (!mediaRecorderRef.current) return;
+
+    if (mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop();
+    }
+
+    clearInterval(recordingTimerRef.current);
+
+    recordingTimerRef.current = null;
+    mediaRecorderRef.current = null;
+
+    setIsRecording(false);
+    setRecordingTime(0);
+  };
+
+
+  const formatRecordingTime = (seconds) => {
+    const minutes = Math.floor(seconds / 60)
+      .toString()
+      .padStart(2, "0");
+
+    const secs = (seconds % 60)
+      .toString()
+      .padStart(2, "0");
+
+    return `${minutes}:${secs}`;
+  };
+
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -183,6 +289,48 @@ const ChatPage = () => {
     setSelectedMessage(message);
     setShowDeleteMenu(true);
   };
+
+  const handleMessageContextMenu = (e, message) => {
+
+    e.preventDefault();
+
+    // Deleted messages cannot have reactions
+    if (message.isDeleted) return;
+
+    setReactionMessageId(message._id);
+    setReactionPickerMessageId(null);
+
+  };
+
+  const handleReaction = async (messageId, emoji) => {
+
+    try {
+
+      await reactToMessage(
+        messageId,
+        emoji
+      );
+
+      setReactionMessageId(null);
+      setReactionPickerMessageId(null);
+
+    } catch (error) {
+
+      console.log(
+        "Reaction failed:",
+        error
+      );
+
+    }
+
+  };
+
+  const handleMoreReaction = (messageId) => {
+    setReactionMessageId(messageId);
+    setReactionPickerMessageId(messageId);
+  };
+
+
 
   const handleEditClick = () => {
     if (!selectedMessage) return;
@@ -283,7 +431,6 @@ const ChatPage = () => {
   }, [])
 
   useEffect(() => {
-
     const handleClickOutside = (e) => {
 
       if (
@@ -291,18 +438,19 @@ const ChatPage = () => {
         !emojiPickerRef.current.contains(e.target)
       ) {
         setShowEmojiPicker(false);
+        setReactionPickerMessageId(null);
       }
 
+      if (!e.target.closest(".reaction-area")) {
+        setReactionMessageId(null);
+      }
     };
 
     document.addEventListener("mousedown", handleClickOutside);
 
-    return () =>
-      document.removeEventListener(
-        "mousedown",
-        handleClickOutside
-      );
-
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
   }, []);
 
 
@@ -484,6 +632,42 @@ const ChatPage = () => {
     return () => socket.off("messagesRead");
   }, [selectedConversation]);
 
+  useEffect(() => {
+
+    const handleReactionUpdated = ({
+      messageId,
+      reactions
+    }) => {
+
+      setMessages(prev =>
+        prev.map(message =>
+          message._id === messageId
+            ? {
+              ...message,
+              reactions
+            }
+            : message
+        )
+      );
+
+    };
+
+    socket.on(
+      "messageReactionUpdated",
+      handleReactionUpdated
+    );
+
+    return () => {
+
+      socket.off(
+        "messageReactionUpdated",
+        handleReactionUpdated
+      );
+
+    };
+
+  }, []);
+
   // 👇 ADD THIS HERE
   if (initializing) {
     return (
@@ -624,11 +808,76 @@ const ChatPage = () => {
                     }`}
                 >
                   <div
+                    onContextMenu={(e) => handleMessageContextMenu(e, msg)}
                     className={`relative max-w-xs px-3 py-2 rounded-2xl text-sm shadow ${msg.sender === user._id
                       ? "bg-[#635BFF] text-white rounded-br-sm"
                       : "bg-[#181C2A] text-gray-100 rounded-bl-sm"
                       }`}
                   >
+                    {/* REACTION BAR */}
+                    {reactionMessageId === msg._id &&
+                      !msg.isDeleted && (
+                        <div
+                          className={`reaction-area absolute z-50 bottom-full mb-2 ${msg.sender === user._id ? "right-0" : "left-0"
+                            }`}
+                        >
+                          <div className="flex items-center gap-1 bg-[#0C0F1A] border border-white/10 rounded-full px-2 py-1.5 shadow-2xl">
+
+                            {["👍", "❤️", "😂", "😮", "😢", "😡"].map((emoji) => {
+
+                              const myReaction = msg.reactions?.find(
+                                (reaction) =>
+                                  reaction.user?.toString() === user._id?.toString()
+                              );
+
+                              const isSelected = myReaction?.emoji === emoji;
+
+                              return (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => handleReaction(msg._id, emoji)}
+                                  className={`w-8 h-8 rounded-full flex items-center justify-center text-lg hover:bg-white/10 hover:scale-110 transition ${isSelected
+                                    ? "bg-white/10 scale-110"
+                                    : ""
+                                    }`}
+                                >
+                                  {emoji}
+                                </button>
+                              );
+
+                            })}
+
+                            <button
+                              type="button"
+                              onClick={() => handleMoreReaction(msg._id)}
+                              className="w-8 h-8 rounded-full flex items-center justify-center text-lg text-gray-300 hover:bg-white/10 hover:scale-110 transition"
+                            >
+                              +
+                            </button>
+
+                          </div>
+
+                          {reactionPickerMessageId === msg._id && (
+                            <div
+                              ref={emojiPickerRef}
+                              className="absolute bottom-12 left-0 z-[60]"
+                            >
+                              <Picker
+                                data={data}
+                                onEmojiSelect={(emoji) =>
+                                  handleReaction(msg._id, emoji.native)
+                                }
+                                theme="dark"
+                                previewPosition="none"
+                                skinTonePosition="none"
+                              />
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                    {/* THREE DOT MENU */}
                     {!msg.isDeleted && (
                       <button
                         type="button"
@@ -639,6 +888,8 @@ const ChatPage = () => {
                         ⋮
                       </button>
                     )}
+
+                    {/* MESSAGE CONTENT */}
                     {msg.isDeleted ? (
                       <p className="italic text-gray-400">
                         This message was deleted
@@ -683,7 +934,16 @@ const ChatPage = () => {
                           </div>
                         ) : (
                           <>
-                            {msg.text && <p>{msg.text}</p>}
+                            {msg.text && (
+                              <p
+                                onContextMenu={(e) =>
+                                  handleMessageContextMenu(e, msg)
+                                }
+                                className="cursor-context-menu select-text"
+                              >
+                                {msg.text}
+                              </p>
+                            )}
 
                             {msg.isEdited && (
                               <span className="text-[10px] text-gray-400 italic ml-1">
@@ -692,125 +952,69 @@ const ChatPage = () => {
                             )}
                           </>
                         )}
+
+                        {/* ATTACHMENT */}
                         {msg.attachment && (() => {
 
-                          const fileUrl = `http://localhost:5000/uploads${msg.attachment.url}`;
-                          const fileType = msg.attachment.fileType || "";
-                          const fileName = msg.attachment.fileName || "Attachment";
+                          const attachmentUrl = msg.attachment.url.startsWith("/uploads/")
+                            ? msg.attachment.url
+                            : `/uploads${msg.attachment.url}`;
 
-                          const isImage = fileType.startsWith("image/");
-                          const isVideo = fileType.startsWith("video/");
-                          const isPdf = fileType === "application/pdf";
-                          const isAudio = fileType.startsWith("audio/");
-
-                          const extension =
-                            fileName.includes(".")
-                              ? fileName.split(".").pop().toUpperCase()
-                              : "FILE";
+                          const fullAttachmentUrl =
+                            `http://localhost:5000${attachmentUrl}`;
 
                           return (
                             <div className="mt-2">
 
                               {/* IMAGE */}
-                              {isImage && (
-                                <a
-                                  href={fileUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  <img
-                                    src={fileUrl}
-                                    alt={fileName}
-                                    className="rounded-lg max-w-[240px] max-h-[300px] object-cover cursor-pointer"
-                                  />
-                                </a>
+                              {msg.attachment.fileType?.startsWith("image/") && (
+                                <img
+                                  src={fullAttachmentUrl}
+                                  alt={msg.attachment.fileName}
+                                  className="max-w-[250px] max-h-[300px] rounded-lg object-contain cursor-pointer"
+                                  onClick={() =>
+                                    window.open(fullAttachmentUrl, "_blank")
+                                  }
+                                />
                               )}
 
                               {/* VIDEO */}
-                              {isVideo && (
+                              {msg.attachment.fileType?.startsWith("video/") && (
                                 <video
+                                  src={fullAttachmentUrl}
                                   controls
-                                  className="rounded-lg max-w-[260px] max-h-[300px]"
-                                >
-                                  <source
-                                    src={fileUrl}
-                                    type={fileType}
-                                  />
-                                </video>
+                                  className="max-w-[300px] max-h-[300px] rounded-lg"
+                                />
                               )}
 
-                              {/* AUDIO */}
-                              {isAudio && (
-                                <div className="bg-[#101522] border border-white/10 rounded-xl p-3 w-[260px]">
-                                  <div className="flex items-center gap-3 mb-2">
-                                    <div className="w-10 h-10 rounded-lg bg-[#635BFF]/20 flex items-center justify-center text-xl">
-                                      🎵
-                                    </div>
+                              {/* OTHER FILES - ZIP, PDF, DOC, HTML, ETC. */}
+                              {!msg.attachment.fileType?.startsWith("image/") &&
+                                !msg.attachment.fileType?.startsWith("video/") && (
+                                  <a
+                                    href={fullAttachmentUrl}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-3 p-3 bg-[#101522] rounded-lg hover:bg-[#151b2b] transition"
+                                  >
+                                    <span className="text-2xl">📄</span>
 
                                     <div className="min-w-0">
-                                      <p className="text-sm font-medium truncate">
-                                        {fileName}
+                                      <p className="text-sm text-white truncate max-w-[180px]">
+                                        {msg.attachment.fileName}
                                       </p>
 
                                       <p className="text-xs text-gray-400">
-                                        Audio
+                                        {msg.attachment.size
+                                          ? `${(
+                                            msg.attachment.size /
+                                            1024 /
+                                            1024
+                                          ).toFixed(2)} MB`
+                                          : "File"}
                                       </p>
                                     </div>
-                                  </div>
-
-                                  <audio
-                                    controls
-                                    className="w-full"
-                                  >
-                                    <source
-                                      src={fileUrl}
-                                      type={fileType}
-                                    />
-                                  </audio>
-                                </div>
-                              )}
-
-                              {/* PDF / DOCUMENT */}
-                              {!isImage && !isVideo && !isAudio && (
-                                <a
-                                  href={fileUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="block w-[280px] max-w-full bg-[#101522] border border-white/10 rounded-xl p-3 hover:bg-[#171c2b] transition"
-                                >
-
-                                  <div className="flex items-center gap-3">
-
-                                    {/* FILE ICON */}
-                                    <div className={`w-11 h-11 rounded-lg flex items-center justify-center text-lg font-bold ${isPdf
-                                      ? "bg-red-500/15 text-red-400"
-                                      : "bg-[#635BFF]/15 text-[#8b83ff]"
-                                      }`}>
-                                      {isPdf ? "PDF" : "📄"}
-                                    </div>
-
-                                    {/* FILE INFORMATION */}
-                                    <div className="flex-1 min-w-0">
-
-                                      <p className="text-sm font-medium truncate">
-                                        {fileName}
-                                      </p>
-
-                                      <p className="text-xs text-gray-400 mt-1">
-                                        {isPdf ? "PDF Document" : `${extension} File`}
-                                      </p>
-
-                                    </div>
-
-                                    {/* OPEN ICON */}
-                                    <div className="text-gray-400 text-lg">
-                                      ↗
-                                    </div>
-
-                                  </div>
-
-                                </a>
-                              )}
+                                  </a>
+                                )}
 
                             </div>
                           );
@@ -819,49 +1023,109 @@ const ChatPage = () => {
                       </>
                     )}
 
+                    {/* REACTIONS */}
+
+                    {!msg.isDeleted &&
+                      msg.reactions?.length > 0 && (
+
+                        <div className="flex flex-wrap gap-1 mt-1">
+
+                          {msg.reactions.map((reaction, index) => {
+
+                            const isMyReaction =
+                              reaction.user?.toString() ===
+                              user._id?.toString();
+
+                            return (
+                              <button
+                                key={`${reaction.user}-${index}`}
+                                type="button"
+                                onClick={() => {
+
+                                  // Only your own reaction can be removed
+                                  if (isMyReaction) {
+
+                                    handleReaction(
+                                      msg._id,
+                                      reaction.emoji
+                                    );
+
+                                  }
+
+                                }}
+                                className={`text-sm bg-[#101522] border border-white/10 rounded-full px-2 py-0.5 shadow transition ${isMyReaction
+                                  ? "hover:scale-105 cursor-pointer"
+                                  : "cursor-default"
+                                  }`}
+                                title={
+                                  isMyReaction
+                                    ? "Remove reaction"
+                                    : "Reaction"
+                                }
+                              >
+                                {reaction.emoji}
+                              </button>
+                            );
+
+                          })}
+
+                        </div>
+                      )}
+
+                    {/* TIME */}
                     <p className="text-[10px] text-gray-300 mt-1 text-right">
                       {new Date(msg.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
                     </p>
+
+                    {/* READ STATUS */}
                     {msg.sender === user._id && (
-                      <p className="text-[11px] mt-0.5 text-right"
-                        style={{ color: msg.read ? "#4F9EFF" : "#ccc" }}>
-                        {msg.read ? "✓✓" : msg.delivered ? "✓✓" : "✓"}
+                      <p
+                        className="text-[11px] mt-0.5 text-right"
+                        style={{
+                          color: msg.read ? "#4F9EFF" : "#ccc"
+                        }}
+                      >
+                        {msg.read
+                          ? "✓✓"
+                          : msg.delivered
+                            ? "✓✓"
+                            : "✓"}
                       </p>
                     )}
 
-                    {selectedMessage?._id === msg._id && showDeleteMenu && (
-                      <div className="absolute right-0 top-8 z-50 w-40 bg-[#0C0F1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
+                    {/* EDIT / DELETE MENU */}
+                    {selectedMessage?._id === msg._id &&
+                      showDeleteMenu && (
+                        <div className="absolute right-0 top-8 z-50 w-40 bg-[#0C0F1A] border border-white/10 rounded-xl shadow-2xl overflow-hidden">
 
-                        {msg.sender === user._id && msg.text && !msg.isDeleted && (
+                          {msg.sender === user._id &&
+                            msg.text &&
+                            !msg.isDeleted && (
+                              <button
+                                type="button"
+                                onClick={handleEditClick}
+                                className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5 transition"
+                              >
+                                Edit
+                              </button>
+                            )}
+
                           <button
                             type="button"
-                            onClick={handleEditClick}
-                            className="w-full px-4 py-3 text-left text-sm text-white hover:bg-white/5 transition"
+                            onClick={handleDeleteClick}
+                            className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-white/5 transition"
                           >
-                            Edit
+                            Delete
                           </button>
-                        )}
 
-                        <button
-                          type="button"
-                          onClick={handleDeleteClick}
-                          className="w-full px-4 py-3 text-left text-sm text-red-400 hover:bg-white/5 transition"
-                        >
-                          Delete
-                        </button>
-
-                      </div>
-                    )}
-
-
+                        </div>
+                      )}
                   </div>
                 </div>
               ))}
-
-              <div ref={messagesEndRef}></div>
 
             </div>
 
@@ -894,42 +1158,79 @@ const ChatPage = () => {
                 onChange={handleFileUpload}
               />
 
-              <input
-                type="text"
-                value={messageText}
-                onChange={(e) => {
+              <div className="flex-1 relative flex items-center rounded-full bg-[#181C2A] border border-white/10">
 
-                  setMessageText(e.target.value);
+                {/* MIC BUTTON */}
+                <button
+                  type="button"
+                  onClick={
+                    isRecording
+                      ? stopRecording
+                      : startRecording
+                  }
+                  className={`ml-2 w-9 h-9 flex items-center justify-center rounded-full transition ${isRecording
+                      ? "bg-red-500 text-white animate-pulse"
+                      : "text-gray-300 hover:text-white hover:bg-white/10"
+                    }`}
+                  title={
+                    isRecording
+                      ? "Stop recording"
+                      : "Record voice message"
+                  }
+                >
+                  {isRecording ? "■" : "🎤"}
+                </button>
 
-                  if (!selectedConversation) return;
+                {/* INPUT / RECORDING */}
+                {isRecording ? (
+                  <div className="flex-1 px-3 text-sm text-red-400">
+                    Recording {formatRecordingTime(recordingTime)}
+                  </div>
+                ) : (
+                  <input
+                    type="text"
+                    value={messageText}
+                    onChange={(e) => {
 
-                  socket.emit("typing", {
-                    conversationId: selectedConversation._id,
-                    userName: user.name,
-                  });
+                      setMessageText(e.target.value);
 
-                  clearTimeout(typingTimeout.current);
+                      if (!selectedConversation) return;
 
-                  typingTimeout.current = setTimeout(() => {
+                      socket.emit("typing", {
+                        conversationId: selectedConversation._id,
+                        userName: user.name,
+                      });
 
-                    socket.emit("stopTyping", {
-                      conversationId: selectedConversation._id,
-                    });
+                      clearTimeout(typingTimeout.current);
 
-                  }, 1000);
+                      typingTimeout.current = setTimeout(() => {
 
-                }}
-                placeholder="Type a message…"
-                className="flex-1 rounded-full bg-[#181C2A] border border-white/10 px-4 py-2 text-sm"
-              />
+                        socket.emit("stopTyping", {
+                          conversationId: selectedConversation._id,
+                        });
 
+                      }, 1000);
+
+                    }}
+                    placeholder="Type a message…"
+                    className="flex-1 bg-transparent px-3 py-2 text-sm outline-none"
+                  />
+                )}
+
+              </div>
+
+              {/* EMOJI */}
               <button
                 type="button"
-                onClick={() => setShowEmojiPicker(prev => !prev)}
+                onClick={() =>
+                  setShowEmojiPicker((prev) => !prev)
+                }
                 className="text-2xl px-2 hover:scale-110 transition"
               >
                 😊
               </button>
+
+              {/* ATTACHMENT */}
               <button
                 type="button"
                 onClick={() => fileInputRef.current.click()}
@@ -938,19 +1239,23 @@ const ChatPage = () => {
                 📎
               </button>
 
-              <button
-                type="submit"
-                className="inline-flex items-center justify-center rounded-full w-10 h-10 bg-[#635BFF]"
-              >
-                ➤
-              </button>
+              {/* SEND */}
+              {!isRecording && (
+                <button
+                  type="submit"
+                  className="inline-flex items-center justify-center rounded-full w-10 h-10 bg-[#635BFF]"
+                >
+                  ➤
+                </button>
+              )}
 
             </form>
 
           </>
-        )}
+        )
+        }
 
-      </div>
+      </div >
 
       {showNewChat && (
         <NewChatModal
@@ -961,58 +1266,60 @@ const ChatPage = () => {
         />
       )}
 
-      {showDeleteConfirm && selectedMessage && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      {
+        showDeleteConfirm && selectedMessage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm">
 
-          <div className="w-[90%] max-w-sm bg-[#0C0F1A] border border-white/10 rounded-2xl p-5 shadow-2xl">
+            <div className="w-[90%] max-w-sm bg-[#0C0F1A] border border-white/10 rounded-2xl p-5 shadow-2xl">
 
-            <h3 className="text-lg font-semibold text-white">
-              Delete message?
-            </h3>
+              <h3 className="text-lg font-semibold text-white">
+                Delete message?
+              </h3>
 
-            <p className="text-sm text-gray-400 mt-2">
-              Choose how you want to delete this message.
-            </p>
+              <p className="text-sm text-gray-400 mt-2">
+                Choose how you want to delete this message.
+              </p>
 
-            <div className="flex flex-col gap-2 mt-5">
+              <div className="flex flex-col gap-2 mt-5">
 
-              <button
-                type="button"
-                onClick={() => handleDeleteMessage("me")}
-                className="w-full px-4 py-3 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-white transition"
-              >
-                Delete for me
-              </button>
-
-              {selectedMessage.sender === user._id && (
                 <button
                   type="button"
-                  onClick={() => handleDeleteMessage("everyone")}
-                  className="w-full px-4 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-sm text-red-400 transition"
+                  onClick={() => handleDeleteMessage("me")}
+                  className="w-full px-4 py-3 rounded-lg bg-white/5 hover:bg-white/10 text-sm text-white transition"
                 >
-                  Delete for everyone
+                  Delete for me
                 </button>
-              )}
 
-              <button
-                type="button"
-                onClick={() => {
-                  setShowDeleteConfirm(false);
-                  setSelectedMessage(null);
-                }}
-                className="w-full px-4 py-3 rounded-lg text-sm text-gray-400 hover:bg-white/5 transition"
-              >
-                Cancel
-              </button>
+                {selectedMessage.sender === user._id && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteMessage("everyone")}
+                    className="w-full px-4 py-3 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-sm text-red-400 transition"
+                  >
+                    Delete for everyone
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDeleteConfirm(false);
+                    setSelectedMessage(null);
+                  }}
+                  className="w-full px-4 py-3 rounded-lg text-sm text-gray-400 hover:bg-white/5 transition"
+                >
+                  Cancel
+                </button>
+
+              </div>
 
             </div>
 
           </div>
+        )
+      }
 
-        </div>
-      )}
-
-    </div>
+    </div >
   )
 }
 

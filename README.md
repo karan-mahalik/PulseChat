@@ -1,5 +1,7 @@
 # PulseChat
 
+**🌐 Professional portfolio:** [Karan Mahalik — Data Analyst & Power BI Developer](https://karan-mahalik-portfolio.vercel.app/)
+
 A modern full-stack real-time chat application built using React, Socket.IO, Express.js, and MongoDB.
 
 ## Features
